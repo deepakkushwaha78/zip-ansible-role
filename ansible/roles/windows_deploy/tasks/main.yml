@@ -1,0 +1,106 @@
+---
+- name: Initialize per-host deployment state
+  ansible.builtin.set_fact:
+    deployment_mutated: false
+    backup_available: false
+  tags:
+    - always
+
+- name: Execute guarded Windows deployment
+  block:
+    - name: Ensure deployment directory exists
+      ansible.windows.win_file:
+        path: "{{ deployment_path }}"
+        state: directory
+      tags:
+        - backup
+        - copy
+        - deploy
+
+    - name: Ensure backup root directory exists
+      ansible.windows.win_file:
+        path: "{{ backup_path }}"
+        state: directory
+      tags:
+        - backup
+        - deploy
+
+    - name: Run application backup phase
+      ansible.builtin.import_tasks: backup.yml
+      tags:
+        - backup
+        - deploy
+
+    - name: Run archive transfer phase
+      ansible.builtin.import_tasks: copy.yml
+      tags:
+        - copy
+        - deploy
+
+    - name: Run application extraction phase
+      ansible.builtin.import_tasks: unzip.yml
+      tags:
+        - deploy
+
+    - name: Start service and wait for readiness
+      ansible.builtin.import_tasks: restart.yml
+      tags:
+        - deploy
+
+    - name: Run post-deployment validation phase
+      ansible.builtin.import_tasks: validate.yml
+      tags:
+        - deploy
+        - validate
+
+    - name: Mark selected operation successful
+      ansible.builtin.set_fact:
+        deploy_status: "success"
+      tags:
+        - always
+
+  rescue:
+    - name: Mark selected operation failed
+      ansible.builtin.set_fact:
+        deploy_status: "failed"
+      tags:
+        - always
+
+    - name: Report deployment failure before automatic rollback
+      ansible.builtin.debug:
+        msg: >-
+          Deployment failed on {{ inventory_hostname }}:
+          {{ ansible_failed_result.msg | default('see the preceding task failure') }}
+      tags:
+        - always
+
+    - name: Automatically restore the previous deployment
+      ansible.builtin.import_tasks: rollback.yml
+      when:
+        - auto_rollback_on_failure | bool
+        - deployment_mutated | bool
+        - backup_available | bool
+      tags:
+        - always
+
+    - name: Explain why automatic rollback was not run
+      ansible.builtin.debug:
+        msg: >-
+          Automatic rollback was not run because no usable pre-deployment backup
+          exists or deployment files were not modified.
+      when: not (auto_rollback_on_failure | bool and deployment_mutated | bool and backup_available | bool)
+      tags:
+        - always
+
+    - name: Fail host after deployment recovery handling
+      ansible.builtin.fail:
+        msg: "Deployment failed on {{ inventory_hostname }}; deploy_status=failed."
+      tags:
+        - always
+
+  always:
+    - name: Report final host deployment state
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} deployment status: {{ deploy_status | default('failed') }}"
+      tags:
+        - always

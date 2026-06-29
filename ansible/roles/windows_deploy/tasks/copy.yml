@@ -1,0 +1,29 @@
+---
+- name: Copy application ZIP archive to Windows host
+  ansible.windows.win_copy:
+    src: "{{ zip_source_path }}"
+    dest: "{{ remote_archive_path }}"
+    force: true
+  register: copied_archive
+
+- name: Calculate controller archive SHA-256 checksum
+  ansible.builtin.stat:
+    path: "{{ zip_source_path }}"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  register: local_archive
+
+- name: Calculate remote archive SHA-256 checksum
+  ansible.windows.win_stat:
+    path: "{{ remote_archive_path }}"
+    checksum_algorithm: sha256
+  register: remote_archive
+
+- name: Assert copied archive checksum matches source
+  ansible.builtin.assert:
+    that:
+      - local_archive.stat.exists
+      - remote_archive.stat.exists
+      - local_archive.stat.checksum == remote_archive.stat.checksum
+    fail_msg: "SHA-256 mismatch for {{ remote_archive_path }} on {{ inventory_hostname }}."
+    success_msg: "Archive SHA-256 checksum verified on {{ inventory_hostname }}."

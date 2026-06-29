@@ -1,0 +1,6 @@
+---
+# Internal paths are role vars so inventory cannot accidentally make backup and
+# deployment point to the same directory.
+rollback_deployment_path: "{{ backup_path }}\\{{ application_name }}_previous"
+remote_archive_path: "{{ deployment_path }}\\{{ zip_file }}"
+application_executable_path: "{{ deployment_path }}\\{{ application_executable }}"

@@ -1,0 +1,26 @@
+---
+application_name: "myapp"
+service_name: "MyAppService"
+deployment_path: 'C:\Deploy'
+backup_path: 'C:\Backup'
+zip_file: "app.zip"
+zip_source_path: "{{ playbook_dir }}/../files/{{ zip_file }}"
+application_executable: "MyApp.exe"
+
+health_check_url: ""
+health_check_status_codes:
+  - 200
+validate_health_certificate: true
+
+deployment_timeout: 120
+service_poll_interval: 5
+parallel_batch_size: 20
+maximum_failure_percentage: 10
+
+delete_archive_after_unzip: true
+auto_rollback_on_failure: true
+preserve_config_patterns:
+  - '\.config$'
+  - '\.json$'
+  - '\.ya?ml$'
+  - '\\config\\'

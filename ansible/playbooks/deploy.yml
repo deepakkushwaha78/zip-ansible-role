@@ -1,0 +1,135 @@
+---
+- name: Initialize deployment run and validate controller artifact
+  hosts: localhost
+  gather_facts: true
+  any_errors_fatal: true
+  vars_files:
+    - "../inventories/production/group_vars.yml"
+
+  tasks:
+    - name: Record deployment start time
+      ansible.builtin.set_fact:
+        deployment_started_epoch: "{{ ansible_date_time.epoch | int }}"
+      tags:
+        - always
+
+    - name: Inspect application archive on controller
+      ansible.builtin.stat:
+        path: "{{ zip_source_path }}"
+        get_checksum: false
+        get_mime: true
+      register: source_archive
+      tags:
+        - copy
+        - deploy
+
+    - name: Assert controller application archive is a ZIP file
+      ansible.builtin.assert:
+        that:
+          - source_archive.stat.exists | default(false)
+          - source_archive.stat.isreg | default(false)
+          - source_archive.stat.size | default(0) | int > 0
+          - source_archive.stat.mimetype | default('') in
+            ['application/zip', 'application/x-zip-compressed']
+        fail_msg: >-
+          {{ zip_source_path }} is missing or is not a ZIP archive. Replace the
+          supplied placeholder with the real application package.
+      tags:
+        - copy
+        - deploy
+
+- name: Deploy application to Windows servers in rolling batches
+  hosts: windows
+  gather_facts: false
+  serial: "{{ parallel_batch_size | int }}"
+  max_fail_percentage: "{{ maximum_failure_percentage | int }}"
+  vars_files:
+    - "../inventories/production/group_vars.yml"
+
+  pre_tasks:
+    - name: Initialize host result as skipped
+      ansible.builtin.set_fact:
+        deploy_status: "skipped"
+      tags:
+        - always
+
+    - name: Verify WinRM connectivity before deployment
+      ansible.windows.win_ping:
+      register: winrm_connectivity
+      failed_when: false
+      ignore_unreachable: true
+      changed_when: false
+      tags:
+        - always
+        - connectivity
+
+    - name: Mark host failed when WinRM connectivity check fails
+      ansible.builtin.set_fact:
+        deploy_status: "failed"
+      when: winrm_connectivity.ping | default('') != "pong"
+      tags:
+        - always
+
+    - name: Stop processing host when WinRM is unavailable
+      ansible.builtin.meta: end_host
+      when: winrm_connectivity.ping | default('') != "pong"
+      tags:
+        - always
+
+  tasks:
+    - name: Execute Windows deployment role
+      ansible.builtin.import_role:
+        name: windows_deploy
+
+- name: Generate deployment summary
+  hosts: localhost
+  gather_facts: true
+  vars_files:
+    - "../inventories/production/group_vars.yml"
+  vars:
+    deployment_targets: "{{ groups['windows'] | default([]) }}"
+
+  tasks:
+    - name: Initialize deployment summary groups
+      ansible.builtin.set_fact:
+        successful_servers: []
+        failed_servers: []
+        skipped_servers: []
+      tags:
+        - always
+
+    - name: Classify each server deployment result
+      ansible.builtin.set_fact:
+        successful_servers: >-
+          {{ successful_servers + ([item] if
+          (hostvars[item].deploy_status | default('skipped')) == 'success' else []) }}
+        failed_servers: >-
+          {{ failed_servers + ([item] if
+          (hostvars[item].deploy_status | default('skipped')) == 'failed' else []) }}
+        skipped_servers: >-
+          {{ skipped_servers + ([item] if
+          (hostvars[item].deploy_status | default('skipped')) == 'skipped' else []) }}
+      loop: "{{ deployment_targets }}"
+      loop_control:
+        label: "{{ item }}"
+      tags:
+        - always
+
+    - name: Calculate deployment elapsed time
+      ansible.builtin.set_fact:
+        deployment_elapsed_seconds: >-
+          {{ (ansible_date_time.epoch | int) -
+             (deployment_started_epoch | default(ansible_date_time.epoch) | int) }}
+      tags:
+        - always
+
+    - name: Show deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "Successful servers ({{ successful_servers | length }}): {{ successful_servers | join(', ') | default('none', true) }}"
+          - "Failed servers ({{ failed_servers | length }}): {{ failed_servers | join(', ') | default('none', true) }}"
+          - "Skipped servers ({{ skipped_servers | length }}): {{ skipped_servers | join(', ') | default('none', true) }}"
+          - "Elapsed time: {{ deployment_elapsed_seconds }} seconds"
+          - "Rolling batch size: {{ parallel_batch_size }}"
+      tags:
+        - always

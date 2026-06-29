@@ -1,0 +1,17 @@
+---
+- name: Ensure Windows application service is started
+  ansible.windows.win_service:
+    name: "{{ service_name }}"
+    state: started
+
+- name: Wait until Windows application service reports started
+  ansible.windows.win_service_info:
+    name: "{{ service_name }}"
+  register: application_service_info
+  until:
+    - application_service_info.exists
+    - application_service_info.services | length == 1
+    - application_service_info.services[0].state == "started"
+  retries: "{{ ((deployment_timeout | int) / (service_poll_interval | int)) | round(0, 'ceil') | int }}"
+  delay: "{{ service_poll_interval | int }}"
+  changed_when: false

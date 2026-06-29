@@ -1,0 +1,112 @@
+---
+- name: Initialize rollback run
+  hosts: localhost
+  gather_facts: true
+  tasks:
+    - name: Record rollback start time
+      ansible.builtin.set_fact:
+        rollback_started_epoch: "{{ ansible_date_time.epoch | int }}"
+      tags:
+        - always
+
+- name: Roll back application on Windows servers in rolling batches
+  hosts: windows
+  gather_facts: false
+  serial: "{{ parallel_batch_size | int }}"
+  max_fail_percentage: "{{ maximum_failure_percentage | int }}"
+  vars_files:
+    - "../inventories/production/group_vars.yml"
+
+  pre_tasks:
+    - name: Initialize host rollback result as skipped
+      ansible.builtin.set_fact:
+        rollback_status: "skipped"
+      tags:
+        - always
+
+    - name: Verify WinRM connectivity before rollback
+      ansible.windows.win_ping:
+      register: winrm_connectivity
+      failed_when: false
+      ignore_unreachable: true
+      changed_when: false
+      tags:
+        - always
+        - connectivity
+        - rollback
+
+    - name: Mark rollback failed when WinRM connectivity check fails
+      ansible.builtin.set_fact:
+        rollback_status: "failed"
+      when: winrm_connectivity.ping | default('') != "pong"
+      tags:
+        - always
+
+    - name: Stop processing host when WinRM is unavailable
+      ansible.builtin.meta: end_host
+      when: winrm_connectivity.ping | default('') != "pong"
+      tags:
+        - always
+
+  tasks:
+    - name: Execute guarded rollback
+      block:
+        - name: Restore previous application deployment
+          ansible.builtin.import_role:
+            name: windows_deploy
+            tasks_from: rollback
+
+      rescue:
+        - name: Mark host rollback failed
+          ansible.builtin.set_fact:
+            rollback_status: "failed"
+
+        - name: Fail host after rollback failure
+          ansible.builtin.fail:
+            msg: "Rollback failed on {{ inventory_hostname }}."
+      tags:
+        - rollback
+
+- name: Generate rollback summary
+  hosts: localhost
+  gather_facts: true
+  vars_files:
+    - "../inventories/production/group_vars.yml"
+  vars:
+    rollback_targets: "{{ groups['windows'] | default([]) }}"
+
+  tasks:
+    - name: Initialize rollback summary groups
+      ansible.builtin.set_fact:
+        successful_servers: []
+        failed_servers: []
+        skipped_servers: []
+      tags:
+        - always
+
+    - name: Classify each server rollback result
+      ansible.builtin.set_fact:
+        successful_servers: >-
+          {{ successful_servers + ([item] if
+          (hostvars[item].rollback_status | default('skipped')) == 'success' else []) }}
+        failed_servers: >-
+          {{ failed_servers + ([item] if
+          (hostvars[item].rollback_status | default('skipped')) == 'failed' else []) }}
+        skipped_servers: >-
+          {{ skipped_servers + ([item] if
+          (hostvars[item].rollback_status | default('skipped')) == 'skipped' else []) }}
+      loop: "{{ rollback_targets }}"
+      loop_control:
+        label: "{{ item }}"
+      tags:
+        - always
+
+    - name: Show rollback summary
+      ansible.builtin.debug:
+        msg:
+          - "Successful servers ({{ successful_servers | length }}): {{ successful_servers | join(', ') | default('none', true) }}"
+          - "Failed servers ({{ failed_servers | length }}): {{ failed_servers | join(', ') | default('none', true) }}"
+          - "Skipped servers ({{ skipped_servers | length }}): {{ skipped_servers | join(', ') | default('none', true) }}"
+          - "Elapsed time: {{ (ansible_date_time.epoch | int) - (rollback_started_epoch | default(ansible_date_time.epoch) | int) }} seconds"
+      tags:
+        - always

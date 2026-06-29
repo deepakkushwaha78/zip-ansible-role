@@ -1,0 +1,41 @@
+---
+- name: Check deployment directory
+  ansible.windows.win_stat:
+    path: "{{ deployment_path }}"
+  register: validated_deployment_directory
+
+- name: Check application executable
+  ansible.windows.win_stat:
+    path: "{{ application_executable_path }}"
+  register: validated_application_executable
+
+- name: Read Windows service status
+  ansible.windows.win_service_info:
+    name: "{{ service_name }}"
+  register: validated_service
+
+- name: Request optional application health endpoint
+  ansible.windows.win_uri:
+    url: "{{ health_check_url }}"
+    url_method: GET
+    status_code: "{{ health_check_status_codes }}"
+    validate_certs: "{{ validate_health_certificate | bool }}"
+    url_timeout: "{{ deployment_timeout | int }}"
+  register: validated_health
+  when: health_check_url | length > 0
+
+- name: Assert application validation checks passed
+  ansible.builtin.assert:
+    that:
+      - validated_deployment_directory.stat.exists | default(false)
+      - validated_deployment_directory.stat.isdir | default(false)
+      - validated_application_executable.stat.exists | default(false)
+      - not (validated_application_executable.stat.isdir | default(false))
+      - validated_service.exists
+      - validated_service.services | length == 1
+      - validated_service.services[0].state == "started"
+      - health_check_url | length == 0 or
+        (validated_health.status_code | default(0) | int) in
+        (health_check_status_codes | map('int') | list)
+    fail_msg: "Application validation failed on {{ inventory_hostname }}."
+    success_msg: "Application validation passed on {{ inventory_hostname }}."

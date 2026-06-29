@@ -1,0 +1,23 @@
+---
+- name: Validate application on Windows servers
+  hosts: windows
+  gather_facts: false
+  serial: "{{ parallel_batch_size | int }}"
+  vars_files:
+    - "../inventories/production/group_vars.yml"
+
+  pre_tasks:
+    - name: Verify WinRM connectivity before validation
+      ansible.windows.win_ping:
+      changed_when: false
+      tags:
+        - connectivity
+        - validate
+
+  tasks:
+    - name: Run application validation checks
+      ansible.builtin.import_role:
+        name: windows_deploy
+        tasks_from: validate
+      tags:
+        - validate

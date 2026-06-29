@@ -1,0 +1,41 @@
+---
+- name: Stop Windows service before changing application files
+  ansible.windows.win_service:
+    name: "{{ service_name }}"
+    state: stopped
+
+- name: Mark deployment files as about to be modified
+  ansible.builtin.set_fact:
+    deployment_mutated: true
+
+- name: Discover existing files in deployment directory
+  ansible.windows.win_find:
+    paths:
+      - "{{ deployment_path }}"
+    recurse: true
+    file_type: file
+    hidden: true
+    get_checksum: false
+  register: deployment_files
+
+- name: Remove old application files while retaining configuration and archive
+  ansible.windows.win_file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ deployment_files.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when:
+    - item.path | lower != remote_archive_path | lower
+    - preserve_config_patterns | length == 0 or
+      not (item.path | regex_search(preserve_config_patterns | join('|'), ignorecase=true))
+
+- name: Extract application ZIP into deployment directory
+  community.windows.win_unzip:
+    src: "{{ remote_archive_path }}"
+    dest: "{{ deployment_path }}"
+    delete_archive: "{{ delete_archive_after_unzip | bool }}"
+  notify: start application service
+
+- name: Start application service after successful extraction
+  ansible.builtin.meta: flush_handlers

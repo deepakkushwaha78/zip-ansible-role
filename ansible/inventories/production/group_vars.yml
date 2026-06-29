@@ -1,0 +1,37 @@
+---
+# Application identity and Windows service name.
+application_name: "myapp"
+service_name: "MyAppService"
+
+# Target paths. The fixed "_previous" directory is the rollback point.
+deployment_path: 'C:\Deploy'
+backup_path: 'C:\Backup'
+
+# Artifact path is relative to ansible/files unless zip_source_path is overridden.
+zip_file: "app.zip"
+zip_source_path: "{{ playbook_dir }}/../files/{{ zip_file }}"
+application_executable: "MyApp.exe"
+
+# Leave blank to disable HTTP validation. This URL is requested by each target.
+health_check_url: ""
+health_check_status_codes:
+  - 200
+validate_health_certificate: true
+
+# Rolling deployment and timeout controls.
+deployment_timeout: 120
+service_poll_interval: 5
+parallel_batch_size: 20
+maximum_failure_percentage: 10
+
+# Deployment behavior.
+delete_archive_after_unzip: true
+auto_rollback_on_failure: true
+
+# Case-insensitive regular expressions matched against full Windows file paths.
+# The archive itself is always preserved until extraction completes.
+preserve_config_patterns:
+  - '\.config$'
+  - '\.json$'
+  - '\.ya?ml$'
+  - '\\config\\'

@@ -1,0 +1,6 @@
+---
+- name: Start Windows application service
+  ansible.windows.win_service:
+    name: "{{ service_name }}"
+    state: started
+  listen: start application service

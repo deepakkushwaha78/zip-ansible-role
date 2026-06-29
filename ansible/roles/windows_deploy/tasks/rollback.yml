@@ -1,0 +1,44 @@
+---
+- name: Check rollback directory
+  ansible.windows.win_stat:
+    path: "{{ rollback_deployment_path }}"
+  register: rollback_backup
+
+- name: Assert rollback backup exists
+  ansible.builtin.assert:
+    that:
+      - rollback_backup.stat.exists | default(false)
+      - rollback_backup.stat.isdir | default(false)
+    fail_msg: "Rollback backup is missing at {{ rollback_deployment_path }}."
+
+- name: Stop Windows service before rollback
+  ansible.windows.win_service:
+    name: "{{ service_name }}"
+    state: stopped
+
+- name: Remove failed deployment directory
+  ansible.windows.win_file:
+    path: "{{ deployment_path }}"
+    state: absent
+
+- name: Recreate deployment directory for rollback
+  ansible.windows.win_file:
+    path: "{{ deployment_path }}"
+    state: directory
+
+- name: Restore rollback contents into deployment directory
+  ansible.windows.win_copy:
+    src: "{{ rollback_deployment_path }}\\"
+    dest: "{{ deployment_path }}\\"
+    remote_src: true
+    force: true
+
+- name: Start restored application and wait for service
+  ansible.builtin.import_tasks: restart.yml
+
+- name: Validate restored application
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Mark rollback successful
+  ansible.builtin.set_fact:
+    rollback_status: "success"

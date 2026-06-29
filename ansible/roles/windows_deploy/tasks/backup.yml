@@ -1,0 +1,44 @@
+---
+- name: Check for an existing deployed application before backup
+  ansible.windows.win_stat:
+    path: "{{ application_executable_path }}"
+  register: current_application
+
+- name: Remove the prior rollback point when an application is deployed
+  ansible.windows.win_file:
+    path: "{{ rollback_deployment_path }}"
+    state: absent
+  when:
+    - current_application.stat.exists | default(false)
+    - not (current_application.stat.isdir | default(false))
+
+- name: Create a clean rollback directory
+  ansible.windows.win_file:
+    path: "{{ rollback_deployment_path }}"
+    state: directory
+  when:
+    - current_application.stat.exists | default(false)
+    - not (current_application.stat.isdir | default(false))
+
+- name: Copy current application contents into the rollback directory
+  ansible.windows.win_copy:
+    src: "{{ deployment_path }}\\"
+    dest: "{{ rollback_deployment_path }}\\"
+    remote_src: true
+    force: true
+  when:
+    - current_application.stat.exists | default(false)
+    - not (current_application.stat.isdir | default(false))
+
+- name: Record whether a rollback backup is available
+  ansible.builtin.set_fact:
+    backup_available: >-
+      {{ current_application.stat.exists and
+         not (current_application.stat.isdir | default(false)) }}
+
+- name: Report backup phase result
+  ansible.builtin.debug:
+    msg: >-
+      {{ ('Rollback backup created at ' ~ rollback_deployment_path)
+         if backup_available else
+         'No existing application files were found; no rollback backup was created.' }}
