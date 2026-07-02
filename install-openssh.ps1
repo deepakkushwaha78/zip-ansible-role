@@ -1,74 +1,135 @@
-# =====================================================
+############################################################
 # OpenSSH Installation Script
-# =====================================================
+# Author  : Deepak Kushwaha
+# Purpose : Install OpenSSH on Windows
+############################################################
 
-$Source = "C:\Users\Administrator\Downloads\OpenSSH-Win64"
+$Source      = "C:\Users\Administrator\Downloads\OpenSSH-Win64"
 $Destination = "C:\Program Files\OpenSSH"
 
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host " OpenSSH Installation Started"
+Write-Host "        OpenSSH Installation Started"
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Verify source folder exists
+#----------------------------------------------------------
+# Check Source Folder
+#----------------------------------------------------------
+
 if (!(Test-Path $Source))
 {
-    Write-Host "ERROR: Source folder not found:" -ForegroundColor Red
+    Write-Host "ERROR: Source folder not found." -ForegroundColor Red
     Write-Host $Source
     exit 1
 }
 
-# Create destination folder
+#----------------------------------------------------------
+# Create Destination Folder
+#----------------------------------------------------------
+
 if (!(Test-Path $Destination))
 {
-    Write-Host "Creating $Destination ..."
-    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    Write-Host "Creating OpenSSH directory..."
+    New-Item `
+        -ItemType Directory `
+        -Path $Destination `
+        -Force | Out-Null
 }
 
-# Copy OpenSSH files
+#----------------------------------------------------------
+# Copy OpenSSH Files
+#----------------------------------------------------------
+
 Write-Host "Copying OpenSSH files..."
-Copy-Item "$Source\*" "$Destination\" -Recurse -Force
 
-# Change directory
-Set-Location $Destination
+Copy-Item `
+    "$Source\*" `
+    "$Destination\" `
+    -Recurse `
+    -Force
 
-Write-Host "Current Directory:"
-Get-Location
+#----------------------------------------------------------
+# Verify install-sshd.ps1
+#----------------------------------------------------------
 
-# Verify install script exists
-if (!(Test-Path ".\install-sshd.ps1"))
+if (!(Test-Path "$Destination\install-sshd.ps1"))
 {
-    Write-Host "ERROR: install-sshd.ps1 not found." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "ERROR : install-sshd.ps1 not found." -ForegroundColor Red
     exit 1
 }
 
+#----------------------------------------------------------
+# Install OpenSSH
+#----------------------------------------------------------
+
 Write-Host ""
-Write-Host "Running install-sshd.ps1..."
+Write-Host "Installing OpenSSH..."
 Write-Host ""
 
-powershell.exe -ExecutionPolicy Bypass -File ".\install-sshd.ps1"
+Set-Location $Destination
+
+powershell.exe `
+    -ExecutionPolicy Bypass `
+    -File "$Destination\install-sshd.ps1"
 
 if ($LASTEXITCODE -ne 0)
 {
-    Write-Host "Installation script failed." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "OpenSSH Installation Failed." -ForegroundColor Red
     exit 1
 }
 
-Write-Host ""
-Write-Host "Configuring sshd service..."
+#----------------------------------------------------------
+# Configure SSHD Service
+#----------------------------------------------------------
 
-Set-Service -Name sshd -StartupType Automatic
+Write-Host ""
+Write-Host "Configuring SSHD Service..."
+
+Set-Service sshd -StartupType Automatic
 
 Start-Service sshd
 
-Write-Host ""
-Write-Host "Checking sshd Service..."
+#----------------------------------------------------------
+# Create Firewall Rule (if missing)
+#----------------------------------------------------------
 
-Get-Service sshd
+if (!(Get-NetFirewallRule -DisplayName "OpenSSH Server (sshd)" -ErrorAction SilentlyContinue))
+{
+    Write-Host "Creating Firewall Rule..."
+
+    New-NetFirewallRule `
+        -DisplayName "OpenSSH Server (sshd)" `
+        -Direction Inbound `
+        -Protocol TCP `
+        -Action Allow `
+        -LocalPort 22 | Out-Null
+}
+
+#----------------------------------------------------------
+# Validation
+#----------------------------------------------------------
 
 Write-Host ""
-Write-Host "Checking Port 22..."
+Write-Host "Validating Installation..."
+
+$Service = Get-Service sshd
+
+if ($Service.Status -eq "Running")
+{
+    Write-Host ""
+    Write-Host "SSHD Service : RUNNING" -ForegroundColor Green
+}
+else
+{
+    Write-Host ""
+    Write-Host "SSHD Service : NOT RUNNING" -ForegroundColor Red
+}
+
+Write-Host ""
+Write-Host "Listening Port..."
 
 netstat -ano | findstr ":22"
 
